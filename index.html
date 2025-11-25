@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>与謝野晶子クローン兵団を迎撃せよ！</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon192x192.png">
+    <link rel="icon" href="icon192x192.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'HiraMinProN-W6', 'Mincho', serif; touch-action: none; }
         #canvas-container { width: 100vw; height: 100vh; display: block; }
