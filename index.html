@@ -41,7 +41,6 @@
         /* スマホ縦画面 (Portrait) */
         @media (max-width: 1023px) and (orientation: portrait) {
             #mobile-controls { display: block; }
-            /* 縦画面では下半分を操作エリアにする */
             .control-zone { height: 40%; bottom: 0; }
             #fire-btn { bottom: 40px; right: 20px; }
         }
@@ -49,9 +48,7 @@
         /* スマホ横画面 (Landscape) */
         @media (max-width: 1023px) and (orientation: landscape) {
             #mobile-controls { display: block; }
-            /* 横画面では画面全体を操作エリアにする */
             .control-zone { height: 100%; top: 0; }
-            /* ボタン位置を横持ち用に調整 */
             #fire-btn { bottom: 30px; right: 30px; width: 70px; height: 70px; font-size: 14px; }
             h1 { font-size: 32px; }
         }
@@ -84,14 +81,14 @@
         let score = 0;
         let spawnRate = 100; 
         let enemySpeed = 0.05;
-        const playerSpeed = 0.15;
+        const playerSpeed = 0.15; // プレイヤーの最大移動速度
         let projectiles = [];
         let enemies = [];
         let frame = 0;
 
         // コントローラー連射制御用
         let lastShotTime = 0;
-        const shotCooldown = 15; // フレーム数
+        const shotCooldown = 15; 
 
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
@@ -103,7 +100,7 @@
         
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // パフォーマンス向上のためピクセル比を制限
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
         container.appendChild(renderer.domElement);
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -121,41 +118,33 @@
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        // 画像がない場合のフォールバック処理（エラー回避）
         let akikoMaterial;
         const textureLoader = new THREE.TextureLoader();
         textureLoader.load(
             './Akiko.png', 
-            (texture) => {
-                akikoMaterial = new THREE.SpriteMaterial({ map: texture });
-            },
+            (texture) => { akikoMaterial = new THREE.SpriteMaterial({ map: texture }); },
             undefined,
             (err) => {
-                // 画像読み込み失敗時は赤い四角を表示
                 const canvas = document.createElement('canvas');
                 canvas.width = 64; canvas.height = 64;
                 const ctx = canvas.getContext('2d');
                 ctx.fillStyle = 'red'; ctx.fillRect(0,0,64,64);
                 const fallbackTexture = new THREE.CanvasTexture(canvas);
                 akikoMaterial = new THREE.SpriteMaterial({ map: fallbackTexture });
-                console.warn('Akiko.png not found, using fallback.');
             }
         );
 
         const keys = { w: false, a: false, s: false, d: false };
         let mobileMove = { x: 0, y: 0 }; 
-        let mobileLook = { x: 0, y: 0 }; 
         
         document.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
         document.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
         
         document.addEventListener('click', () => {
             if (isGameRunning) {
-                // PCかつタッチデバイスでない場合のみポインターロック
                 if(!isMobile() && document.pointerLockElement !== document.body) {
                     document.body.requestPointerLock();
                 }
-                // モバイルのボタン以外でのクリック射撃（PC用）
                 if(!isMobile()) shoot();
             }
         });
@@ -189,16 +178,25 @@
                     const dx = t.clientX - touchStartPos[side].x;
                     const dy = t.clientY - touchStartPos[side].y;
                     
-                    // 感度調整 (横画面用に少し感度を下げる)
-                    const sensitivity = 0.004;
-
                     if (side === 'left') {
-                        mobileMove.x = dx * sensitivity;
-                        mobileMove.y = dy * sensitivity;
+                        // 【修正】移動感度の調整
+                        // 100pxドラッグしたら最大速度(1.0)になるように調整
+                        const moveSensitivity = 0.01; 
+                        
+                        mobileMove.x = dx * moveSensitivity;
+                        mobileMove.y = dy * moveSensitivity;
+
+                        // 【重要】最大値を1.0に制限（クランプ）して、爆速になるのを防ぐ
+                        mobileMove.x = Math.max(-1, Math.min(1, mobileMove.x));
+                        mobileMove.y = Math.max(-1, Math.min(1, mobileMove.y));
+
                     } else {
-                        camera.rotation.y -= dx * sensitivity;
-                        camera.rotation.x -= dy * sensitivity;
+                        // 視点感度
+                        const lookSensitivity = 0.004;
+                        camera.rotation.y -= dx * lookSensitivity;
+                        camera.rotation.x -= dy * lookSensitivity;
                         camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                        
                         touchStartPos[side].x = t.clientX; 
                         touchStartPos[side].y = t.clientY;
                     }
@@ -277,7 +275,7 @@
         }
 
         function spawnEnemy() {
-            if (!akikoMaterial) return; // 画像読み込み待ち
+            if (!akikoMaterial) return; 
 
             const sprite = new THREE.Sprite(akikoMaterial);
             sprite.scale.set(1.5, 1.5, 1);
@@ -295,45 +293,35 @@
             enemies.push(sprite);
         }
 
-        // コントローラー入力の処理
         function handleGamepad() {
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
             if (!gamepads) return;
 
-            const gp = gamepads[0]; // 1コンのみ対応
+            const gp = gamepads[0];
             if (gp) {
-                // デッドゾーン（遊び）の設定
                 const deadzone = 0.1;
 
-                // 左スティック (移動)
                 const moveX = Math.abs(gp.axes[0]) > deadzone ? gp.axes[0] : 0;
                 const moveY = Math.abs(gp.axes[1]) > deadzone ? gp.axes[1] : 0;
-
-                // 右スティック (視点)
                 const lookX = Math.abs(gp.axes[2]) > deadzone ? gp.axes[2] : 0;
                 const lookY = Math.abs(gp.axes[3]) > deadzone ? gp.axes[3] : 0;
 
-                // ゲームパッド入力の適用
                 if (moveX !== 0 || moveY !== 0 || lookX !== 0 || lookY !== 0) {
                     const direction = new THREE.Vector3();
                     camera.getWorldDirection(direction);
                     direction.y = 0; 
                     direction.normalize();
-                    
                     const right = new THREE.Vector3();
                     right.crossVectors(direction, camera.up).normalize(); 
 
-                    // 移動
                     camera.position.addScaledVector(direction, -moveY * playerSpeed);
                     camera.position.addScaledVector(right, moveX * playerSpeed);
 
-                    // 視点 (感度調整: 0.03)
                     camera.rotation.y -= lookX * 0.03;
                     camera.rotation.x -= lookY * 0.03;
                     camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
                 }
 
-                // 射撃ボタン (ボタン0: A/X, ボタン7: R2/RT)
                 if (gp.buttons[0].pressed || gp.buttons[7].pressed) {
                     if (frame - lastShotTime > shotCooldown) {
                         shoot();
@@ -350,7 +338,6 @@
 
             frame++;
 
-            // ゲームパッド処理呼び出し
             handleGamepad();
 
             const direction = new THREE.Vector3();
@@ -361,19 +348,18 @@
             const right = new THREE.Vector3();
             right.crossVectors(direction, camera.up).normalize(); 
 
-            // キーボード操作
             if (keys.w) { camera.position.addScaledVector(direction, playerSpeed); }
             if (keys.s) { camera.position.addScaledVector(direction, -playerSpeed); }
             if (keys.d) { camera.position.addScaledVector(right, playerSpeed); }
             if (keys.a) { camera.position.addScaledVector(right, -playerSpeed); }
 
-            // スマホタッチ操作
+            // スマホタッチ操作の適用
+            // 【修正】乗算を削除し、純粋なplayerSpeed * 入力値(0〜1)で移動させる
             if (Math.abs(mobileMove.x) > 0 || Math.abs(mobileMove.y) > 0) {
-                camera.position.addScaledVector(direction, -mobileMove.y * 5); 
-                camera.position.addScaledVector(right, mobileMove.x * 5);
+                camera.position.addScaledVector(direction, -mobileMove.y * playerSpeed); 
+                camera.position.addScaledVector(right, mobileMove.x * playerSpeed);
             }
 
-            // 弾の更新
             for (let i = projectiles.length - 1; i >= 0; i--) {
                 const p = projectiles[i];
                 p.position.add(p.velocity);
