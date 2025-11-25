@@ -277,16 +277,28 @@
             const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
             const bullet = new THREE.Mesh(geometry, material);
             
+            // 1. 弾の発射位置（カメラより少し下）
             bullet.position.copy(camera.position);
             bullet.position.y -= 0.2; 
             
-            const direction = new THREE.Vector3();
-            camera.getWorldDirection(direction);
-            bullet.velocity = direction.multiplyScalar(1.0); 
+            // 2. 修正ロジック：クロスヘアが狙っている「遠くの点」を計算
+            const cameraDir = new THREE.Vector3();
+            camera.getWorldDirection(cameraDir);
+            
+            // カメラの位置から、向いている方向へ100メートル先の点をターゲットにする
+            const targetPoint = new THREE.Vector3().copy(camera.position).add(cameraDir.multiplyScalar(100));
+
+            // 3. 「発射位置」から「ターゲット」に向かうベクトル（方向）を計算
+            const bulletDirection = new THREE.Vector3();
+            bulletDirection.subVectors(targetPoint, bullet.position).normalize();
+
+            // 4. 計算した方向へ弾速を適用
+            bullet.velocity = bulletDirection.multiplyScalar(1.0); 
             
             scene.add(bullet);
             projectiles.push(bullet);
         }
+
 
         function spawnEnemy() {
             if (!akikoMaterial) return; 
