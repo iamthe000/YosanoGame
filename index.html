@@ -279,7 +279,6 @@
             
             // 1. 弾の発射位置（カメラより少し下）
             bullet.position.copy(camera.position);
-            bullet.position.y -= 0.2; 
             
             // 2. 修正ロジック：クロスヘアが狙っている「遠くの点」を計算
             const cameraDir = new THREE.Vector3();
