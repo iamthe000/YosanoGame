@@ -15,25 +15,45 @@
         p { color: #ddd; font-size: 18px; text-align: center; margin-bottom: 20px; line-height: 1.6; }
         button#start-btn { padding: 15px 40px; font-size: 24px; background: #ff3366; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: serif; }
         button#start-btn:active { background: #cc0033; }
-        #mobile-controls { position: absolute; bottom: 20px; width: 100%; height: 150px; display: none; pointer-events: none; }
-        .control-zone { width: 50%; height: 100%; pointer-events: auto; position: absolute; bottom: 0; }
+        
+        /* モバイルコントロールの基本設定 */
+        #mobile-controls { position: absolute; width: 100%; height: 100%; display: none; pointer-events: none; top: 0; left: 0; }
+        .control-zone { width: 50%; height: 100%; pointer-events: auto; position: absolute; bottom: 0; z-index: 5; }
         #left-zone { left: 0; } 
         #right-zone { right: 0; } 
+        
         #fire-btn { 
-            position: absolute; bottom: 40px; right: 20px; width: 80px; height: 80px; 
+            position: absolute; width: 80px; height: 80px; 
             background: rgba(255, 51, 102, 0.5); border: 2px solid white; border-radius: 50%; 
             pointer-events: auto; display: flex; align-items: center; justify-content: center; 
             color: white; font-weight: bold; user-select: none;
-            z-index: 5;
+            z-index: 6;
         }
+
+        /* PC表示 */
         .pc-only { display: none; }
-        @media (min-width: 768px) {
+        @media (min-width: 1024px) {
             .pc-only { display: inline; }
             .mobile-only { display: none; }
             #mobile-controls { display: none !important; }
         }
-        @media (max-width: 767px) {
+
+        /* スマホ縦画面 (Portrait) */
+        @media (max-width: 1023px) and (orientation: portrait) {
             #mobile-controls { display: block; }
+            /* 縦画面では下半分を操作エリアにする */
+            .control-zone { height: 40%; bottom: 0; }
+            #fire-btn { bottom: 40px; right: 20px; }
+        }
+
+        /* スマホ横画面 (Landscape) */
+        @media (max-width: 1023px) and (orientation: landscape) {
+            #mobile-controls { display: block; }
+            /* 横画面では画面全体を操作エリアにする */
+            .control-zone { height: 100%; top: 0; }
+            /* ボタン位置を横持ち用に調整 */
+            #fire-btn { bottom: 30px; right: 30px; width: 70px; height: 70px; font-size: 14px; }
+            h1 { font-size: 32px; }
         }
     </style>
 </head>
@@ -54,7 +74,7 @@
             君、死にたまふことなかれ。<br>
             迫りくる晶子たちをレーザーで撃ち落とせ。<br><br>
             <span class="pc-only">【操作: PC】<br>WASD: 移動 | マウス: 視点<br>クリック: 射撃</span>
-            <span class="mobile-only">【操作: スマホ】<br>左半分ドラッグ: 移動 | 右半分ドラッグ: 視点<br>ボタン: 射撃</span>
+            <span class="mobile-only">【操作: スマホ】<br>左半分ドラッグ: 移動 | 右半分ドラッグ: 視点<br>ボタン: 射撃<br>※横画面・コントローラー対応</span>
         </p>
         <button id="start-btn">迎撃開始</button>
     </div>
@@ -69,6 +89,10 @@
         let enemies = [];
         let frame = 0;
 
+        // コントローラー連射制御用
+        let lastShotTime = 0;
+        const shotCooldown = 15; // フレーム数
+
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x110505); 
@@ -79,6 +103,7 @@
         
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // パフォーマンス向上のためピクセル比を制限
         container.appendChild(renderer.domElement);
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -96,8 +121,26 @@
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        const akikoTexture = new THREE.TextureLoader().load('./Akiko.png');
-        const akikoMaterial = new THREE.SpriteMaterial({ map: akikoTexture });
+        // 画像がない場合のフォールバック処理（エラー回避）
+        let akikoMaterial;
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+            './Akiko.png', 
+            (texture) => {
+                akikoMaterial = new THREE.SpriteMaterial({ map: texture });
+            },
+            undefined,
+            (err) => {
+                // 画像読み込み失敗時は赤い四角を表示
+                const canvas = document.createElement('canvas');
+                canvas.width = 64; canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'red'; ctx.fillRect(0,0,64,64);
+                const fallbackTexture = new THREE.CanvasTexture(canvas);
+                akikoMaterial = new THREE.SpriteMaterial({ map: fallbackTexture });
+                console.warn('Akiko.png not found, using fallback.');
+            }
+        );
 
         const keys = { w: false, a: false, s: false, d: false };
         let mobileMove = { x: 0, y: 0 }; 
@@ -108,9 +151,11 @@
         
         document.addEventListener('click', () => {
             if (isGameRunning) {
+                // PCかつタッチデバイスでない場合のみポインターロック
                 if(!isMobile() && document.pointerLockElement !== document.body) {
                     document.body.requestPointerLock();
                 }
+                // モバイルのボタン以外でのクリック射撃（PC用）
                 if(!isMobile()) shoot();
             }
         });
@@ -144,12 +189,15 @@
                     const dx = t.clientX - touchStartPos[side].x;
                     const dy = t.clientY - touchStartPos[side].y;
                     
+                    // 感度調整 (横画面用に少し感度を下げる)
+                    const sensitivity = 0.004;
+
                     if (side === 'left') {
-                        mobileMove.x = dx * 0.005;
-                        mobileMove.y = dy * 0.005;
+                        mobileMove.x = dx * sensitivity;
+                        mobileMove.y = dy * sensitivity;
                     } else {
-                        camera.rotation.y -= dx * 0.005;
-                        camera.rotation.x -= dy * 0.005;
+                        camera.rotation.y -= dx * sensitivity;
+                        camera.rotation.x -= dy * sensitivity;
                         camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
                         touchStartPos[side].x = t.clientX; 
                         touchStartPos[side].y = t.clientY;
@@ -229,6 +277,8 @@
         }
 
         function spawnEnemy() {
+            if (!akikoMaterial) return; // 画像読み込み待ち
+
             const sprite = new THREE.Sprite(akikoMaterial);
             sprite.scale.set(1.5, 1.5, 1);
             
@@ -245,12 +295,63 @@
             enemies.push(sprite);
         }
 
+        // コントローラー入力の処理
+        function handleGamepad() {
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            if (!gamepads) return;
+
+            const gp = gamepads[0]; // 1コンのみ対応
+            if (gp) {
+                // デッドゾーン（遊び）の設定
+                const deadzone = 0.1;
+
+                // 左スティック (移動)
+                const moveX = Math.abs(gp.axes[0]) > deadzone ? gp.axes[0] : 0;
+                const moveY = Math.abs(gp.axes[1]) > deadzone ? gp.axes[1] : 0;
+
+                // 右スティック (視点)
+                const lookX = Math.abs(gp.axes[2]) > deadzone ? gp.axes[2] : 0;
+                const lookY = Math.abs(gp.axes[3]) > deadzone ? gp.axes[3] : 0;
+
+                // ゲームパッド入力の適用
+                if (moveX !== 0 || moveY !== 0 || lookX !== 0 || lookY !== 0) {
+                    const direction = new THREE.Vector3();
+                    camera.getWorldDirection(direction);
+                    direction.y = 0; 
+                    direction.normalize();
+                    
+                    const right = new THREE.Vector3();
+                    right.crossVectors(direction, camera.up).normalize(); 
+
+                    // 移動
+                    camera.position.addScaledVector(direction, -moveY * playerSpeed);
+                    camera.position.addScaledVector(right, moveX * playerSpeed);
+
+                    // 視点 (感度調整: 0.03)
+                    camera.rotation.y -= lookX * 0.03;
+                    camera.rotation.x -= lookY * 0.03;
+                    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                }
+
+                // 射撃ボタン (ボタン0: A/X, ボタン7: R2/RT)
+                if (gp.buttons[0].pressed || gp.buttons[7].pressed) {
+                    if (frame - lastShotTime > shotCooldown) {
+                        shoot();
+                        lastShotTime = frame;
+                    }
+                }
+            }
+        }
+
         function animate() {
             requestAnimationFrame(animate);
 
             if (!isGameRunning) return;
 
             frame++;
+
+            // ゲームパッド処理呼び出し
+            handleGamepad();
 
             const direction = new THREE.Vector3();
             camera.getWorldDirection(direction);
@@ -260,16 +361,19 @@
             const right = new THREE.Vector3();
             right.crossVectors(direction, camera.up).normalize(); 
 
+            // キーボード操作
             if (keys.w) { camera.position.addScaledVector(direction, playerSpeed); }
             if (keys.s) { camera.position.addScaledVector(direction, -playerSpeed); }
             if (keys.d) { camera.position.addScaledVector(right, playerSpeed); }
             if (keys.a) { camera.position.addScaledVector(right, -playerSpeed); }
 
+            // スマホタッチ操作
             if (Math.abs(mobileMove.x) > 0 || Math.abs(mobileMove.y) > 0) {
                 camera.position.addScaledVector(direction, -mobileMove.y * 5); 
                 camera.position.addScaledVector(right, mobileMove.x * 5);
             }
 
+            // 弾の更新
             for (let i = projectiles.length - 1; i >= 0; i--) {
                 const p = projectiles[i];
                 p.position.add(p.velocity);
