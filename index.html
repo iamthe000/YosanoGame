@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>THE-AKIKO</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon192x192.png">a
+    <link rel="apple-touch-icon" href="icon192x192.png">
     <link rel="icon" href="icon192x192.png">
     <script>
         if ('serviceWorker' in navigator) {
@@ -16,7 +16,7 @@
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'HiraMinProN-W6', 'Mincho', serif; touch-action: none; }
         #canvas-container { width: 100vw; height: 100vh; display: block; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
-        #score-board { color: white; font-size: 24px; padding: 20px; text-shadow: 0 0 5px red; font-weight: bold; }
+        #score-board { color: white; font-size: 24px; padding: 20px; text-shadow: 0 0 5px red; font-weight: bold; position: absolute; top: 0; left: 0; z-index: 2; }
         #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; border: 2px solid lime; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px lime; pointer-events: none; }
         #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; z-index: 10; }
         h1 { color: #ff3366; font-size: 40px; margin-bottom: 10px; text-align: center; }
@@ -24,6 +24,27 @@
         button#start-btn { padding: 15px 40px; font-size: 24px; background: #ff3366; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: serif; }
         button#start-btn:active { background: #cc0033; }
         
+        /* ミニマップ (レーダー) のスタイル */
+        #minimap-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 120px;
+            height: 120px;
+            background: rgba(0, 20, 0, 0.7); /* 暗視スコープ風の背景 */
+            border: 2px solid rgba(0, 255, 0, 0.6);
+            border-radius: 50%;
+            z-index: 5;
+            overflow: hidden;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+            pointer-events: none; /* クリックを透過 */
+        }
+        #minimap {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
         /* モバイルコントロールの基本設定 */
         #mobile-controls { position: absolute; width: 100%; height: 100%; display: none; pointer-events: none; top: 0; left: 0; }
         .control-zone { width: 50%; height: 100%; pointer-events: auto; position: absolute; bottom: 0; z-index: 5; }
@@ -51,6 +72,8 @@
             #mobile-controls { display: block; }
             .control-zone { height: 40%; bottom: 0; }
             #fire-btn { bottom: 40px; right: 20px; }
+            /* 縦画面時はレーダーを少し下げる（指と被らないように） */
+            #minimap-container { top: 60px; right: 20px; width: 100px; height: 100px; }
         }
 
         /* スマホ横画面 (Landscape) */
@@ -59,6 +82,8 @@
             .control-zone { height: 100%; top: 0; }
             #fire-btn { bottom: 30px; right: 30px; width: 70px; height: 70px; font-size: 14px; }
             h1 { font-size: 32px; }
+            /* 横画面時は右上のスペースを活用 */
+            #minimap-container { top: 15px; right: 15px; width: 100px; height: 100px; }
         }
     </style>
 </head>
@@ -66,6 +91,11 @@
     <div id="canvas-container"></div>
     <div id="ui-layer">
         <div id="score-board">撃墜数: <span id="score">0</span></div>
+        
+        <div id="minimap-container">
+            <canvas id="minimap" width="120" height="120"></canvas>
+        </div>
+
         <div id="crosshair"></div>
     </div>
     <div id="mobile-controls">
@@ -188,13 +218,12 @@
                     
                     if (side === 'left') {
                         // 【修正】移動感度の調整
-                        // 100pxドラッグしたら最大速度(1.0)になるように調整
                         const moveSensitivity = 0.01; 
                         
                         mobileMove.x = dx * moveSensitivity;
                         mobileMove.y = dy * moveSensitivity;
 
-                        // 【重要】最大値を1.0に制限（クランプ）して、爆速になるのを防ぐ
+                        // 【重要】最大値を1.0に制限（クランプ）
                         mobileMove.x = Math.max(-1, Math.min(1, mobileMove.x));
                         mobileMove.y = Math.max(-1, Math.min(1, mobileMove.y));
 
@@ -260,13 +289,11 @@
         function gameOver() {
             isGameRunning = false;
 
-            // 【修正点】UIの表示処理を先に書く（これで確実に画面が出るようになります）
             document.querySelector('#overlay h1').innerText = "GAME OVER";
             document.querySelector('#overlay p').innerHTML = `撃墜数: ${score}体<br>君は死にたまひぬ。`;
             document.getElementById('start-btn').innerText = "再挑戦";
             document.getElementById('overlay').style.display = 'flex';
 
-            // 【修正点】PointerLockの解除は、機能が存在する場合のみ安全に実行する
             if (document.exitPointerLock) {
                 document.exitPointerLock();
             }
@@ -277,22 +304,17 @@
             const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
             const bullet = new THREE.Mesh(geometry, material);
             
-            // 1. 弾の発射位置（カメラより少し下）
             bullet.position.copy(camera.position);
             bullet.position.y += 0.2; 
             
-            // 2. 修正ロジック：クロスヘアが狙っている「遠くの点」を計算
             const cameraDir = new THREE.Vector3();
             camera.getWorldDirection(cameraDir);
             
-            // カメラの位置から、向いている方向へ100メートル先の点をターゲットにする
             const targetPoint = new THREE.Vector3().copy(camera.position).add(cameraDir.multiplyScalar(100));
 
-            // 3. 「発射位置」から「ターゲット」に向かうベクトル（方向）を計算
             const bulletDirection = new THREE.Vector3();
             bulletDirection.subVectors(targetPoint, bullet.position).normalize();
 
-            // 4. 計算した方向へ弾速を適用
             bullet.velocity = bulletDirection.multiplyScalar(1.0); 
             
             scene.add(bullet);
@@ -357,6 +379,74 @@
             }
         }
 
+        // --- ミニマップ処理の実装 ---
+        const minimapCanvas = document.getElementById('minimap');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        // Canvasのサイズは120x120
+        const minimapCenter = 60; 
+        const radarRange = 40; // レーダーの検知範囲 (メートル)
+
+        function updateMinimap() {
+            // クリア
+            minimapCtx.clearRect(0, 0, 120, 120);
+
+            // レーダーの背景グリッド線（オプション）
+            minimapCtx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
+            minimapCtx.lineWidth = 1;
+            minimapCtx.beginPath();
+            minimapCtx.arc(minimapCenter, minimapCenter, 30, 0, Math.PI * 2); // 距離円
+            minimapCtx.stroke();
+            
+            // プレイヤー（中心に固定）を描画
+            minimapCtx.fillStyle = '#00ff00';
+            minimapCtx.beginPath();
+            // 三角形で向きを表現（常に上向き）
+            minimapCtx.moveTo(minimapCenter, minimapCenter - 5);
+            minimapCtx.lineTo(minimapCenter - 4, minimapCenter + 4);
+            minimapCtx.lineTo(minimapCenter + 4, minimapCenter + 4);
+            minimapCtx.fill();
+
+            // 敵を描画（プレイヤー中心で回転させる）
+            // レーダー上では、Y軸マイナス（上）がプレイヤーの正面
+            
+            // 1. プレイヤーの向いている方向ベクトルを取得
+            const pDir = new THREE.Vector3();
+            camera.getWorldDirection(pDir);
+            pDir.y = 0; pDir.normalize();
+
+            // 2. プレイヤーの右方向ベクトルを取得
+            const pRight = new THREE.Vector3();
+            pRight.crossVectors(pDir, camera.up).normalize();
+
+            minimapCtx.fillStyle = '#ff3366'; // 晶子カラー
+
+            enemies.forEach(enemy => {
+                // プレイヤーから敵への相対ベクトル
+                const rel = new THREE.Vector3().subVectors(enemy.position, camera.position);
+                const dist = rel.length();
+
+                if (dist < radarRange) {
+                    // 相対位置をプレイヤーのローカル座標系（前後・左右）に投影する
+                    // 前後成分 (Forward distance)
+                    const forwardDist = rel.dot(pDir);
+                    // 左右成分 (Right distance)
+                    const rightDist = rel.dot(pRight);
+
+                    // Canvas上の座標に変換
+                    // X: 左右 (右がプラス)
+                    // Y: 前後 (前がマイナス＝上)
+                    const mapX = minimapCenter + (rightDist / radarRange) * minimapCenter;
+                    const mapY = minimapCenter - (forwardDist / radarRange) * minimapCenter;
+
+                    // 点を描画
+                    minimapCtx.beginPath();
+                    minimapCtx.arc(mapX, mapY, 3, 0, Math.PI * 2);
+                    minimapCtx.fill();
+                }
+            });
+        }
+        // ---------------------------
+
         function animate() {
             requestAnimationFrame(animate);
 
@@ -380,7 +470,6 @@
             if (keys.a) { camera.position.addScaledVector(right, -playerSpeed); }
 
             // スマホタッチ操作の適用
-            // 【修正】乗算を削除し、純粋なplayerSpeed * 入力値(0〜1)で移動させる
             if (Math.abs(mobileMove.x) > 0 || Math.abs(mobileMove.y) > 0) {
                 camera.position.addScaledVector(direction, -mobileMove.y * playerSpeed); 
                 camera.position.addScaledVector(right, mobileMove.x * playerSpeed);
@@ -430,6 +519,9 @@
                     gameOver();
                 }
             }
+
+            // ミニマップ更新
+            updateMinimap();
 
             renderer.render(scene, camera);
         }
