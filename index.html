@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>与謝野晶子クローン兵団を迎撃せよ！</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon192x192.png">
+    <link rel="apple-touch-icon" href="icon192x192.png">a
     <link rel="icon" href="icon192x192.png">
     <script>
         if ('serviceWorker' in navigator) {
@@ -259,11 +259,17 @@
 
         function gameOver() {
             isGameRunning = false;
-            document.exitPointerLock();
+
+            // 【修正点】UIの表示処理を先に書く（これで確実に画面が出るようになります）
             document.querySelector('#overlay h1').innerText = "GAME OVER";
             document.querySelector('#overlay p').innerHTML = `撃墜数: ${score}体<br>君は死にたまひぬ。`;
             document.getElementById('start-btn').innerText = "再挑戦";
             document.getElementById('overlay').style.display = 'flex';
+
+            // 【修正点】PointerLockの解除は、機能が存在する場合のみ安全に実行する
+            if (document.exitPointerLock) {
+                document.exitPointerLock();
+            }
         }
 
         function shoot() {
