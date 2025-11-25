@@ -3,10 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>THE-AKIKO</title>
+    <title>THE-AKIKO (Settings Added)</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon192x192.png">
-    <link rel="icon" href="icon192x192.png">
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js');
@@ -18,12 +16,33 @@
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
         #score-board { color: white; font-size: 24px; padding: 20px; text-shadow: 0 0 5px red; font-weight: bold; position: absolute; top: 0; left: 0; z-index: 2; }
         #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; border: 2px solid lime; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px lime; pointer-events: none; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; z-index: 10; }
-        h1 { color: #ff3366; font-size: 40px; margin-bottom: 10px; text-align: center; }
-        p { color: #ddd; font-size: 18px; text-align: center; margin-bottom: 20px; line-height: 1.6; }
-        button#start-btn { padding: 15px 40px; font-size: 24px; background: #ff3366; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: serif; }
-        button#start-btn:active { background: #cc0033; }
         
+        /* 設定ボタン */
+        #settings-btn {
+            position: absolute; top: 20px; right: 150px; /* ミニマップの左側あたり */
+            font-size: 24px; background: rgba(0,0,0,0.5); color: white; border: 1px solid white;
+            width: 40px; height: 40px; border-radius: 50%; cursor: pointer; pointer-events: auto; z-index: 20;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #settings-btn:hover { background: rgba(255, 51, 102, 0.5); }
+
+        #overlay, #settings-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; z-index: 30; }
+        #settings-overlay { display: none; z-index: 40; } /* 初期は非表示 */
+
+        h1 { color: #ff3366; font-size: 40px; margin-bottom: 10px; text-align: center; }
+        h2 { color: #fff; border-bottom: 1px solid #ff3366; padding-bottom: 5px; margin-bottom: 20px;}
+        p { color: #ddd; font-size: 18px; text-align: center; margin-bottom: 20px; line-height: 1.6; }
+        
+        button.menu-btn { padding: 10px 30px; font-size: 20px; background: #ff3366; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: serif; margin-top: 20px; }
+        button.menu-btn:active { background: #cc0033; }
+        
+        /* 設定メニュー内のスタイル */
+        .setting-item { margin-bottom: 15px; width: 80%; max-width: 300px; color: white; text-align: left; }
+        .setting-item label { display: inline-block; width: 100%; margin-bottom: 5px; font-weight: bold; }
+        .setting-item input[type="range"] { width: 100%; cursor: pointer; }
+        .setting-item input[type="checkbox"] { transform: scale(1.5); margin-right: 10px; cursor: pointer; }
+        .setting-row { display: flex; align-items: center; margin-bottom: 10px; }
+
         #minimap-container {
             position: absolute;
             top: 20px;
@@ -37,6 +56,7 @@
             overflow: hidden;
             box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
             pointer-events: none;
+            transition: opacity 0.3s;
         }
         #minimap { width: 100%; height: 100%; display: block; }
 
@@ -65,6 +85,7 @@
             .control-zone { height: 40%; bottom: 0; }
             #fire-btn { bottom: 40px; right: 20px; }
             #minimap-container { top: 60px; right: 20px; width: 100px; height: 100px; }
+            #settings-btn { top: 60px; right: 130px; } 
         }
 
         @media (max-width: 1023px) and (orientation: landscape) {
@@ -73,6 +94,7 @@
             #fire-btn { bottom: 30px; right: 30px; width: 70px; height: 70px; font-size: 14px; }
             h1 { font-size: 32px; }
             #minimap-container { top: 15px; right: 15px; width: 100px; height: 100px; }
+            #settings-btn { top: 15px; right: 125px; }
         }
     </style>
 </head>
@@ -80,16 +102,19 @@
     <div id="canvas-container"></div>
     <div id="ui-layer">
         <div id="score-board">撃墜数: <span id="score">0</span></div>
+        <button id="settings-btn" title="設定">⚙️</button>
         <div id="minimap-container">
             <canvas id="minimap" width="120" height="120"></canvas>
         </div>
         <div id="crosshair"></div>
     </div>
+    
     <div id="mobile-controls">
         <div id="left-zone" class="control-zone"></div>
         <div id="right-zone" class="control-zone"></div>
         <div id="fire-btn">撃て</div>
     </div>
+
     <div id="overlay">
         <h1>THE-AKIKO</h1>
         <p>
@@ -98,12 +123,35 @@
             <span class="pc-only">【操作: PC】<br>WASD: 移動 | マウス: 視点<br>クリック: 射撃</span>
             <span class="mobile-only">【操作: スマホ】<br>左半分ドラッグ: 移動 | 右半分ドラッグ: 視点<br>ボタン: 射撃<br>※横画面・コントローラー対応</span>
         </p>
-        <button id="start-btn">迎撃開始</button> 
-        <a href="https://github.com/iamthe000/YosanoGame/">ゲームのプログラムはGitHubで公開されています</a>
+        <button id="start-btn" class="menu-btn">迎撃開始</button> 
+        <a href="https://github.com/iamthe000/YosanoGame/" style="color:#666; font-size: 12px; margin-top:20px;">GitHub</a>
     </div>
+
+    <div id="settings-overlay">
+        <h2>環境設定</h2>
+        
+        <div class="setting-item">
+            <label for="sens-slider">視点感度: <span id="sens-val">1.0</span></label>
+            <input type="range" id="sens-slider" min="0.1" max="3.0" step="0.1" value="1.0">
+        </div>
+
+        <div class="setting-item setting-row">
+            <input type="checkbox" id="hitbox-check">
+            <label for="hitbox-check">当たり判定を表示</label>
+        </div>
+
+        <div class="setting-item setting-row">
+            <input type="checkbox" id="minimap-check" checked>
+            <label for="minimap-check">ミニマップを表示</label>
+        </div>
+
+        <button id="close-settings-btn" class="menu-btn">閉じる</button>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         let isGameRunning = false;
+        let isSettingsOpen = false; // 設定画面が開いているか
         let score = 0;
         let spawnRate = 100; 
         let enemySpeed = 0.05;
@@ -111,6 +159,13 @@
         let projectiles = [];
         let enemies = [];
         let frame = 0;
+
+        // 設定値
+        let config = {
+            sensitivity: 1.0,
+            showHitboxes: false,
+            showMinimap: true
+        };
 
         let lastShotTime = 0;
         const shotCooldown = 15; 
@@ -143,6 +198,12 @@
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
+        // プレイヤーの当たり判定表示用
+        const playerHitboxGeo = new THREE.SphereGeometry(1.5, 8, 8); // 敵の接触距離
+        const playerHitboxMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, visible: false });
+        const playerHitbox = new THREE.Mesh(playerHitboxGeo, playerHitboxMat);
+        scene.add(playerHitbox);
+
         let akikoMaterial;
         const textureLoader = new THREE.TextureLoader();
         textureLoader.load(
@@ -165,8 +226,11 @@
         document.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
         document.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
         
-        document.addEventListener('click', () => {
-            if (isGameRunning) {
+        document.addEventListener('click', (e) => {
+            // 設定ボタンやメニュー内クリックの場合は発砲しない
+            if (e.target.closest('#settings-btn') || e.target.closest('#settings-overlay')) return;
+
+            if (isGameRunning && !isSettingsOpen) {
                 if(!isMobile() && document.pointerLockElement !== document.body) {
                     document.body.requestPointerLock();
                 }
@@ -175,9 +239,10 @@
         });
         
         document.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement === document.body) {
-                camera.rotation.y -= e.movementX * 0.002;
-                camera.rotation.x -= e.movementY * 0.002;
+            if (document.pointerLockElement === document.body && !isSettingsOpen) {
+                // 感度設定を適用
+                camera.rotation.y -= e.movementX * 0.002 * config.sensitivity;
+                camera.rotation.x -= e.movementY * 0.002 * config.sensitivity;
                 camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
             }
         });
@@ -188,6 +253,7 @@
         let touchStartPos = { left: null, right: null };
 
         function handleTouchStart(e, side) {
+            if (isSettingsOpen) return;
             e.preventDefault();
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const t = e.changedTouches[i];
@@ -196,6 +262,7 @@
         }
 
         function handleTouchMove(e, side) {
+            if (isSettingsOpen) return;
             e.preventDefault();
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const t = e.changedTouches[i];
@@ -210,7 +277,7 @@
                         mobileMove.x = Math.max(-1, Math.min(1, mobileMove.x));
                         mobileMove.y = Math.max(-1, Math.min(1, mobileMove.y));
                     } else {
-                        const lookSensitivity = 0.004;
+                        const lookSensitivity = 0.004 * config.sensitivity; // 感度適用
                         camera.rotation.y -= dx * lookSensitivity;
                         camera.rotation.x -= dy * lookSensitivity;
                         camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
@@ -241,7 +308,7 @@
 
         fireBtn.addEventListener('touchstart', (e) => {
             e.preventDefault(); 
-            if(isGameRunning) shoot();
+            if(isGameRunning && !isSettingsOpen) shoot();
         }, {passive: false});
 
         function isMobile() {
@@ -254,7 +321,11 @@
             enemySpeed = 0.05;
             document.getElementById('score').innerText = score;
             
-            enemies.forEach(e => scene.remove(e));
+            // 全エンティティ削除（シーンからリムーブ）
+            enemies.forEach(e => {
+                scene.remove(e.sprite);
+                if(e.hitbox) scene.remove(e.hitbox);
+            });
             projectiles.forEach(p => scene.remove(p));
             enemies = [];
             projectiles = [];
@@ -263,6 +334,7 @@
             camera.rotation.set(0, 0, 0);
             
             isGameRunning = true;
+            isSettingsOpen = false;
             document.getElementById('overlay').style.display = 'none';
         }
 
@@ -305,15 +377,75 @@
                 camera.position.z + Math.sin(angle) * radius
             );
             scene.add(sprite);
-            enemies.push(sprite);
+
+            // 当たり判定ビジュアル (半径1.0の球)
+            const hitboxGeo = new THREE.SphereGeometry(1.0, 8, 8);
+            const hitboxMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true, visible: config.showHitboxes });
+            const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
+            hitbox.position.copy(sprite.position);
+            scene.add(hitbox);
+
+            // 管理用オブジェクト
+            enemies.push({ sprite: sprite, hitbox: hitbox });
         }
+
+        // --- 設定メニュー制御 ---
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const sensSlider = document.getElementById('sens-slider');
+        const sensVal = document.getElementById('sens-val');
+        const hitboxCheck = document.getElementById('hitbox-check');
+        const minimapCheck = document.getElementById('minimap-check');
+        const minimapContainer = document.getElementById('minimap-container');
+
+        // 設定を開く
+        settingsBtn.addEventListener('click', () => {
+            isSettingsOpen = true;
+            settingsOverlay.style.display = 'flex';
+            if (document.exitPointerLock) {
+                document.exitPointerLock(); // 設定中はマウスカーソルを表示
+            }
+        });
+
+        // 設定を閉じる
+        closeSettingsBtn.addEventListener('click', () => {
+            isSettingsOpen = false;
+            settingsOverlay.style.display = 'none';
+            // ゲーム中ならポインタロックを再要求（PCの場合）
+            if (isGameRunning && !isMobile() && document.pointerLockElement !== document.body) {
+                document.body.requestPointerLock();
+            }
+        });
+
+        // 感度変更
+        sensSlider.addEventListener('input', (e) => {
+            config.sensitivity = parseFloat(e.target.value);
+            sensVal.innerText = config.sensitivity.toFixed(1);
+        });
+
+        // 当たり判定表示切り替え
+        hitboxCheck.addEventListener('change', (e) => {
+            config.showHitboxes = e.target.checked;
+            // 既存の敵の可視状態を更新
+            enemies.forEach(e => {
+                if(e.hitbox) e.hitbox.material.visible = config.showHitboxes;
+            });
+            playerHitbox.material.visible = config.showHitboxes;
+        });
+
+        // ミニマップ表示切り替え
+        minimapCheck.addEventListener('change', (e) => {
+            config.showMinimap = e.target.checked;
+            minimapContainer.style.opacity = config.showMinimap ? '1' : '0';
+        });
+
 
         // --- コントローラー制御 ---
         function handleGamepad() {
+            if (isSettingsOpen) return; // 設定中は操作不可
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
             let gp = null;
-
-            // スロット0だけでなく、接続されている最初のコントローラーを探す
             for (let i = 0; i < gamepads.length; i++) {
                 if (gamepads[i] && gamepads[i].connected) {
                     gp = gamepads[i];
@@ -323,8 +455,6 @@
             if (!gp) return;
 
             const deadzone = 0.1;
-
-            // 軸の取得 (安全にアクセス)
             const moveX = gp.axes[0] ? (Math.abs(gp.axes[0]) > deadzone ? gp.axes[0] : 0) : 0;
             const moveY = gp.axes[1] ? (Math.abs(gp.axes[1]) > deadzone ? gp.axes[1] : 0) : 0;
             const lookX = gp.axes[2] ? (Math.abs(gp.axes[2]) > deadzone ? gp.axes[2] : 0) : 0;
@@ -341,19 +471,17 @@
                 camera.position.addScaledVector(direction, -moveY * playerSpeed);
                 camera.position.addScaledVector(right, moveX * playerSpeed);
 
-                camera.rotation.y -= lookX * 0.03;
-                camera.rotation.x -= lookY * 0.03;
+                // 感度適用
+                camera.rotation.y -= lookX * 0.03 * config.sensitivity;
+                camera.rotation.x -= lookY * 0.03 * config.sensitivity;
                 camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
             }
 
-            // 弾の発射判定: 主要なボタン(0~7)のどれかが押されていたら発射
             let isFirePressed = false;
             for (let i = 0; i < 8; i++) {
-                if (gp.buttons[i]) {
-                    if (gp.buttons[i].pressed || gp.buttons[i].value > 0.5) {
-                        isFirePressed = true;
-                        break;
-                    }
+                if (gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5)) {
+                    isFirePressed = true;
+                    break;
                 }
             }
 
@@ -372,6 +500,8 @@
         const radarRange = 40; 
 
         function updateMinimap() {
+            if (!config.showMinimap) return; // 非表示なら描画しない
+
             minimapCtx.clearRect(0, 0, 120, 120);
             minimapCtx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
             minimapCtx.lineWidth = 1;
@@ -394,7 +524,8 @@
 
             minimapCtx.fillStyle = '#ff3366'; 
 
-            enemies.forEach(enemy => {
+            enemies.forEach(enemyData => {
+                const enemy = enemyData.sprite;
                 const rel = new THREE.Vector3().subVectors(enemy.position, camera.position);
                 const dist = rel.length();
                 if (dist < radarRange) {
@@ -411,7 +542,13 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            if (!isGameRunning) return;
+            
+            // ゲーム停止中でもレンダリングは続ける（設定画面の背景として）
+            renderer.render(scene, camera);
+
+            // 設定画面が開いているか、ゲームオーバーならロジックを更新しない
+            if (!isGameRunning || isSettingsOpen) return;
+            
             frame++;
             
             handleGamepad();
@@ -433,6 +570,9 @@
                 camera.position.addScaledVector(right, mobileMove.x * playerSpeed);
             }
 
+            // プレイヤーのHitbox位置更新
+            playerHitbox.position.copy(camera.position);
+
             for (let i = projectiles.length - 1; i >= 0; i--) {
                 const p = projectiles[i];
                 p.position.add(p.velocity);
@@ -442,9 +582,12 @@
                     continue;
                 }
                 for (let j = enemies.length - 1; j >= 0; j--) {
-                    const e = enemies[j];
+                    const eData = enemies[j];
+                    const e = eData.sprite;
+                    // 当たり判定距離: 1.0
                     if (p.position.distanceTo(e.position) < 1.0) { 
                         scene.remove(e);
+                        if(eData.hitbox) scene.remove(eData.hitbox);
                         enemies.splice(j, 1);
                         scene.remove(p);
                         projectiles.splice(i, 1);
@@ -462,17 +605,22 @@
             }
 
             for (let i = 0; i < enemies.length; i++) {
-                const e = enemies[i];
+                const eData = enemies[i];
+                const e = eData.sprite;
                 const dir = new THREE.Vector3();
                 dir.subVectors(camera.position, e.position).normalize();
                 dir.y = 0; 
                 e.position.addScaledVector(dir, enemySpeed);
+                
+                // Hitboxの位置も同期
+                if(eData.hitbox) eData.hitbox.position.copy(e.position);
+
+                // ゲームオーバー判定距離: 1.5
                 if (e.position.distanceTo(camera.position) < 1.5) {
                     gameOver();
                 }
             }
             updateMinimap();
-            renderer.render(scene, camera);
         }
 
         window.addEventListener('resize', () => {
