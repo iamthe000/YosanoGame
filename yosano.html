@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>与謝野晶子クローン兵団を迎撃せよ！</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; /* 雰囲気を出すため明朝体 */
+            touch-action: none; /* スマホでのスクロール防止 */
+        }
+        canvas {
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.6);
+            transition: opacity 0.3s;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px #ff0055;
+        }
+        p {
+            font-size: 1.2rem;
+        }
+        #score-board {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 1.5rem;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 2px 2px 0 #000;
+        }
+        .btn {
+            pointer-events: auto;
+            padding: 15px 30px;
+            font-size: 1.5rem;
+            background: #ff0055;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            margin-top: 20px;
+            box-shadow: 0 0 15px #ff0055;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        .hidden {
+            opacity: 0;
+            pointer-events: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="score-board">撃墜数: 0</div>
+
+    <div id="ui-layer">
+        <div id="start-screen">
+            <h1>与謝野晶子<br>クローン兵団を<br>迎撃せよ！</h1>
+            <p>迫りくる晶子を撃ち落とせ。<br>君死にたまふことなかれ。</p>
+            <button class="btn" id="start-btn">迎撃開始</button>
+        </div>
+        <div id="game-over-screen" style="display: none;">
+            <h1 style="color: #ff4444;">GAME OVER</h1>
+            <p id="final-score">撃墜数: 0</p>
+            <p>晶子に圧倒された...</p>
+            <button class="btn" id="restart-btn">再挑戦</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+/**
+ * 設定と初期化
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const uiLayer = document.getElementById('ui-layer');
+const startScreen = document.getElementById('start-screen');
+const gameOverScreen = document.getElementById('game-over-screen');
+const scoreBoard = document.getElementById('score-board');
+const finalScoreText = document.getElementById('final-score');
+
+let width, height;
+let animationId;
+let lastTime = 0;
+let score = 0;
+let isGameOver = false;
+let isPlaying = false;
+
+// 画像の読み込み（Akiko.pngがあれば使い、なければ文字で代用）
+const akikoImg = new Image();
+akikoImg.src = 'Akiko.png';
+let isImageLoaded = false;
+akikoImg.onload = () => { isImageLoaded = true; };
+
+// ゲームオブジェクト管理
+let player;
+let bullets = [];
+let enemies = [];
+let particles = [];
+
+// パラメータ
+const PLAYER_SIZE = 40;
+const BULLET_SPEED = 15;
+const ENEMY_BASE_SPEED = 2;
+const SPAWN_RATE_INITIAL = 1000;
+let spawnTimer = 0;
+let currentSpawnRate = SPAWN_RATE_INITIAL;
+
+/**
+ * リサイズ処理
+ */
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    if (player) {
+        player.y = height - 60;
+        player.x = width / 2;
+    }
+}
+window.addEventListener('resize', resize);
+resize();
+
+/**
+ * クラス定義
+ */
+class Player {
+    constructor() {
+        this.x = width / 2;
+        this.y = height - 60;
+        this.size = 30;
+        this.color = '#4db8ff';
+        this.angle = -Math.PI / 2; // 上向き
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle + Math.PI / 2); // 描画用に回転補正
+        
+        // 自機（砲台のような見た目）
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.moveTo(0, -this.size);
+        ctx.lineTo(this.size / 1.5, this.size / 1.5);
+        ctx.lineTo(-this.size / 1.5, this.size / 1.5);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+
+    aim(targetX, targetY) {
+        this.angle = Math.atan2(targetY - this.y, targetX - this.x);
+    }
+}
+
+class Bullet {
+    constructor(x, y, angle) {
+        this.x = x;
+        this.y = y;
+        this.vx = Math.cos(angle) * BULLET_SPEED;
+        this.vy = Math.sin(angle) * BULLET_SPEED;
+        this.size = 5;
+        this.active = true;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // 画面外に出たら削除
+        if (this.x < 0 || this.x > width || this.y < 0 || this.y > height) {
+            this.active = false;
+        }
+    }
+
+    draw() {
+        ctx.fillStyle = '#ffeb3b';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+class Enemy {
+    constructor() {
+        this.size = 40 + Math.random() * 20; // 大きさはランダム
+        this.x = Math.random() * (width - this.size * 2) + this.size;
+        this.y = -this.size - 50;
+        this.speed = ENEMY_BASE_SPEED + (score * 0.05); // スコアに応じて加速
+        this.active = true;
+        // 少し揺れながら落ちてくる
+        this.wobble = Math.random() * Math.PI * 2;
+        this.wobbleSpeed = 0.05 + Math.random() * 0.05;
+    }
+
+    update() {
+        this.y += this.speed;
+        this.wobble += this.wobbleSpeed;
+        this.x += Math.sin(this.wobble) * 1.5;
+
+        // 画面下、またはプレイヤーに当たったらゲームオーバー判定用
+        if (this.y > height + this.size) {
+            gameOver();
+        }
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        
+        if (isImageLoaded) {
+            // 画像がある場合
+            ctx.drawImage(akikoImg, -this.size/2, -this.size/2, this.size, this.size * (akikoImg.height/akikoImg.width));
+        } else {
+            // 画像がない場合（フォールバック）
+            ctx.fillStyle = '#ff99aa';
+            ctx.beginPath();
+            ctx.rect(-this.size/2, -this.size/2, this.size, this.size * 1.2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#000';
+            ctx.font = `${this.size * 0.5}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("晶子", 0, 0);
+        }
+        ctx.restore();
+    }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 5;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.life = 1.0;
+        this.decay = 0.03 + Math.random() * 0.03;
+        this.color = color;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= this.decay;
+    }
+
+    draw() {
+        ctx.globalAlpha = Math.max(0, this.life);
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+/**
+ * ゲームループとロジック
+ */
+function initGame() {
+    player = new Player();
+    bullets = [];
+    enemies = [];
+    particles = [];
+    score = 0;
+    currentSpawnRate = SPAWN_RATE_INITIAL;
+    isGameOver = false;
+    isPlaying = true;
+    scoreBoard.innerText = `撃墜数: ${score}`;
+    
+    uiLayer.classList.add('hidden');
+    startScreen.style.display = 'none';
+    gameOverScreen.style.display = 'none';
+
+    animate(0);
+}
+
+function spawnEnemy(deltaTime) {
+    spawnTimer += deltaTime;
+    // スコアが上がると出現頻度が上がる
+    let rate = Math.max(200, SPAWN_RATE_INITIAL - (score * 20));
+    
+    if (spawnTimer > rate) {
+        enemies.push(new Enemy());
+        spawnTimer = 0;
+    }
+}
+
+function checkCollisions() {
+    // 弾と敵の衝突
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        for (let j = enemies.length - 1; j >= 0; j--) {
+            const b = bullets[i];
+            const e = enemies[j];
+            
+            const dx = b.x - e.x;
+            const dy = b.y - e.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < e.size/2 + b.size) {
+                // ヒット！
+                createExplosion(e.x, e.y, '#ff0055');
+                bullets.splice(i, 1);
+                enemies.splice(j, 1);
+                score++;
+                scoreBoard.innerText = `撃墜数: ${score}`;
+                break; // 弾1つにつき敵1体
+            }
+        }
+    }
+
+    // 敵とプレイヤーの衝突（または敵が突破）
+    for (let e of enemies) {
+        const dx = e.x - player.x;
+        const dy = e.y - player.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // プレイヤーに衝突
+        if (dist < e.size/2 + player.size/2) {
+            gameOver();
+        }
+        // 画面下部突破の判定はEnemyクラス内で行っています
+    }
+}
+
+function createExplosion(x, y, color) {
+    for (let i = 0; i < 10; i++) {
+        particles.push(new Particle(x, y, color));
+    }
+}
+
+function gameOver() {
+    if (isGameOver) return;
+    isGameOver = true;
+    isPlaying = false;
+    cancelAnimationFrame(animationId);
+
+    uiLayer.classList.remove('hidden');
+    startScreen.style.display = 'none';
+    gameOverScreen.style.display = 'block';
+    finalScoreText.innerText = `最終撃墜数: ${score}`;
+}
+
+function animate(timestamp) {
+    if (!isPlaying) return;
+
+    const deltaTime = timestamp - lastTime;
+    lastTime = timestamp;
+
+    ctx.clearRect(0, 0, width, height);
+
+    // 背景演出（ちょっとした星のようなドット）
+    if (Math.random() < 0.1) {
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(Math.random() * width, Math.random() * height, 2, 2);
+    }
+
+    // プレイヤー描画
+    player.draw();
+
+    // 弾の更新と描画
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        bullets[i].update();
+        bullets[i].draw();
+        if (!bullets[i].active) bullets.splice(i, 1);
+    }
+
+    // 敵の出現、更新、描画
+    spawnEnemy(deltaTime);
+    for (let i = enemies.length - 1; i >= 0; i--) {
+        enemies[i].update();
+        enemies[i].draw();
+        if (!enemies[i].active) enemies.splice(i, 1);
+    }
+
+    // エフェクト
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update();
+        particles[i].draw();
+        if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+
+    checkCollisions();
+
+    animationId = requestAnimationFrame(animate);
+}
+
+/**
+ * 入力ハンドリング
+ */
+function handleInput(clientX, clientY) {
+    if (!isPlaying) return;
+    
+    // プレイヤーの向き調整
+    player.aim(clientX, clientY);
+    
+    // 発射
+    bullets.push(new Bullet(player.x, player.y, player.angle));
+}
+
+// マウス・タッチイベント共通化
+window.addEventListener('pointerdown', (e) => {
+    // UI上のクリックは無視
+    if (e.target.closest('.btn')) return;
+    handleInput(e.clientX, e.clientY);
+});
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    lastTime = performance.now();
+    initGame();
+});
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+    lastTime = performance.now();
+    initGame();
+});
+
+</script>
+</body>
+</html>
