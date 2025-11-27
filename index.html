@@ -148,7 +148,7 @@
         let frame = 0;
         
         // --- 物理演算・移動パラメータ ---
-        const playerSpeed = 0.15;
+        const playerSpeed = 0.20;
         const GRAVITY = 0.015;
         const JUMP_FORCE = 0.35; // 最大到達高さ 約4.0
         const PLAYER_HEIGHT = 1.6;
@@ -647,7 +647,7 @@
                         score++;
                         document.getElementById('score').innerText = score;
                         if(score % 5 === 0) spawnRate = Math.max(20, spawnRate - 5);
-                        if(score % 10 === 0) enemySpeed += 0.005;
+                        if(score % 10 === 0) enemySpeed = Math.min(enemySpeed + 0.005, 0.17);
                         break; 
                     }
                 }
