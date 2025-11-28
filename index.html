@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>THE-AKIKO</title>
+    <title>THE-AKIKO: Infinite World</title>
     <link rel="manifest" href="manifest.json">
     <script>
         if ('serviceWorker' in navigator) {
@@ -108,10 +108,10 @@
     </div>
 
     <div id="overlay">
-        <h1>THE-AKIKO<br><span style="font-size:20px;">- Cube World -</span></h1>
+        <h1>THE-AKIKO<br><span style="font-size:20px;">- Infinite World -</span></h1>
         <p>
-            正六面体の荒野。<br>
-            小さい箱は踏み台に、大きい箱は壁になる。<br>
+            無限に広がる正六面体の荒野。<br>
+            BGMの聞こえる方角に奴らはいる。<br>
             <br>
             <span class="pc-only">【PC】WASD:移動 | SPACE:ジャンプ | Click:射撃</span>
             <span class="mobile-only">【スマホ】左操作:移動 | 右操作:視点 | ボタン:射撃/跳躍</span>
@@ -150,23 +150,40 @@
         // --- 物理演算・移動パラメータ ---
         const playerSpeed = 0.20;
         const GRAVITY = 0.015;
-        const JUMP_FORCE = 0.35; // 最大到達高さ 約4.0
+        const JUMP_FORCE = 0.35; 
         const PLAYER_HEIGHT = 1.6;
         const PLAYER_RADIUS = 0.5;
         
-        // プレイヤー物理状態
         let playerVelocity = new THREE.Vector3();
         let isGrounded = false;
         
         let projectiles = [];
         let enemies = []; 
-        let blocks = []; 
+        let blocks = []; // 現在のチャンク内の全ブロック
 
         // 設定値
         let config = { sensitivity: 1.0, showHitboxes: false, showMinimap: true };
-
-        // コントローラー状態管理用
         let gamepadState = { shot: false, jump: false };
+
+        // --- オーディオ設定 (NEW) ---
+        let audioListener;
+        let bgmBuffer = null;
+        const audioLoader = new THREE.AudioLoader();
+
+        // BGM.mp3の読み込み（同じディレクトリに配置してください）
+        audioLoader.load('BGM.mp3', 
+            (buffer) => { 
+                console.log("BGM Loaded");
+                bgmBuffer = buffer; 
+            },
+            (xhr) => { console.log((xhr.loaded / xhr.total * 100) + '% loaded'); },
+            (err) => { console.warn("BGM.mp3 not found. Audio disabled.", err); }
+        );
+
+        // --- 無限ワールド設定 (NEW) ---
+        const CHUNK_SIZE = 60; // 1チャンクの広さ
+        const LOAD_DISTANCE = 2; // 読み込むチャンクの範囲 (半径)
+        const activeChunks = {}; // "x,z" : [mesh1, mesh2...]
 
         // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
@@ -177,6 +194,10 @@
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.rotation.order = "YXZ"; 
         
+        // AudioListenerをカメラに追加（プレイヤーの耳）
+        audioListener = new THREE.AudioListener();
+        camera.add(audioListener);
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
@@ -188,11 +209,12 @@
         pointLight.position.set(0, 20, 0);
         scene.add(pointLight);
 
-        const gridHelper = new THREE.GridHelper(200, 200, 0xff3366, 0x333333);
+        // 無限グリッド用のヘルパー（サイズを大きくし、プレイヤーに合わせて移動させる）
+        const gridHelper = new THREE.GridHelper(300, 300, 0xff3366, 0x333333);
         scene.add(gridHelper);
         
         const floorPlane = new THREE.Mesh(
-            new THREE.PlaneGeometry(200, 200),
+            new THREE.PlaneGeometry(1000, 1000), // 床も大きく
             new THREE.MeshBasicMaterial({ visible: false })
         );
         floorPlane.rotation.x = -Math.PI / 2;
@@ -313,47 +335,127 @@
 
         function isMobile() { return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent); }
 
-        // --- ブロック生成 ---
-        function createRandomBlocks() {
-            blocks.forEach(b => scene.remove(b.mesh));
-            blocks = [];
+        // --- 無限ワールド生成ロジック (NEW) ---
+        // 座標に基づいた決定論的乱数 (シード機能)
+        function seededRandom(x, z) {
+            const dot = x * 12.9898 + z * 78.233;
+            const sin = Math.sin(dot) * 43758.5453;
+            return sin - Math.floor(sin);
+        }
 
+        function getChunkKey(cx, cz) {
+            return `${cx},${cz}`;
+        }
+
+        function generateChunk(cx, cz) {
+            const chunkKey = getChunkKey(cx, cz);
+            if (activeChunks[chunkKey]) return; // 既に存在すれば何もしない
+
+            const chunkBlocks = [];
             const boxGeo = new THREE.BoxGeometry(1, 1, 1);
             const boxMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
             const edgeGeo = new THREE.EdgesGeometry(boxGeo);
             const edgeMat = new THREE.LineBasicMaterial({ color: 0x00ff00 });
 
-            for (let i = 0; i < 40; i++) {
-                const isBig = Math.random() < 0.3; 
-                const size = isBig ? 6 : 3; 
+            // 1チャンクあたりのブロック数 (ランダム性を持たせつつ固定)
+            const seed = seededRandom(cx, cz);
+            const blockCount = Math.floor(10 + seed * 10); 
+
+            for (let i = 0; i < blockCount; i++) {
+                // チャンク内でのローカル座標生成
+                const r1 = seededRandom(cx * i, cz + i);
+                const r2 = seededRandom(cx + i, cz * i);
+                const r3 = seededRandom(cx - i, cz - i);
+                
+                const isBig = r3 > 0.7;
+                const size = isBig ? 6 : 3;
                 
                 const mesh = new THREE.Mesh(boxGeo, boxMat);
-                mesh.scale.set(size, size, size); 
-                
-                let x, z;
-                do {
-                    x = (Math.random() - 0.5) * 120;
-                    z = (Math.random() - 0.5) * 120;
-                } while(Math.abs(x) < 10 && Math.abs(z) < 10);
+                mesh.scale.set(size, size, size);
 
-                mesh.position.set(x, size / 2, z); 
+                const locX = (r1 - 0.5) * CHUNK_SIZE;
+                const locZ = (r2 - 0.5) * CHUNK_SIZE;
+                
+                const worldX = cx * CHUNK_SIZE + locX;
+                const worldZ = cz * CHUNK_SIZE + locZ;
+
+                mesh.position.set(worldX, size / 2, worldZ);
                 scene.add(mesh);
 
                 const edges = new THREE.LineSegments(edgeGeo, edgeMat);
                 mesh.add(edges);
 
-                blocks.push({ mesh: mesh, box: new THREE.Box3().setFromObject(mesh) });
+                // ブロックデータを保存 (meshと当たり判定用box)
+                chunkBlocks.push({ mesh: mesh, box: new THREE.Box3().setFromObject(mesh) });
+            }
+            activeChunks[chunkKey] = chunkBlocks;
+        }
+
+        function removeChunk(key) {
+            if (activeChunks[key]) {
+                activeChunks[key].forEach(b => {
+                    scene.remove(b.mesh);
+                    b.mesh.geometry.dispose();
+                });
+                delete activeChunks[key];
             }
         }
 
+        function updateWorldChunks() {
+            const currentCx = Math.floor(camera.position.x / CHUNK_SIZE);
+            const currentCz = Math.floor(camera.position.z / CHUNK_SIZE);
+
+            // ロード範囲のチャンクを生成
+            const keepKeys = new Set();
+            for (let x = -LOAD_DISTANCE; x <= LOAD_DISTANCE; x++) {
+                for (let z = -LOAD_DISTANCE; z <= LOAD_DISTANCE; z++) {
+                    const cx = currentCx + x;
+                    const cz = currentCz + z;
+                    generateChunk(cx, cz);
+                    keepKeys.add(getChunkKey(cx, cz));
+                }
+            }
+
+            // 範囲外のチャンクを削除
+            for (let key in activeChunks) {
+                if (!keepKeys.has(key)) {
+                    removeChunk(key);
+                }
+            }
+
+            // 当たり判定用のblocks配列を再構築 (現在の全チャンクのブロックを集約)
+            blocks = [];
+            for (let key in activeChunks) {
+                blocks = blocks.concat(activeChunks[key]);
+            }
+
+            // 無限グリッドの演出: グリッドの位置をプレイヤーに合わせてスナップ移動
+            gridHelper.position.x = Math.floor(camera.position.x / 10) * 10;
+            gridHelper.position.z = Math.floor(camera.position.z / 10) * 10;
+            floorPlane.position.x = camera.position.x;
+            floorPlane.position.z = camera.position.z;
+        }
+
+
         // --- ゲーム管理関数 ---
         function resetGame() {
+            // AudioContext再開 (ブラウザポリシー対応)
+            if (audioListener.context.state === 'suspended') {
+                audioListener.context.resume();
+            }
+
             score = 0;
             spawnRate = 100;
             enemySpeed = 0.05;
             document.getElementById('score').innerText = score;
             
-            enemies.forEach(e => { scene.remove(e.sprite); if(e.hitbox) scene.remove(e.hitbox); });
+            // 敵削除
+            enemies.forEach(e => { 
+                scene.remove(e.sprite); 
+                if(e.hitbox) scene.remove(e.hitbox);
+                // 音源停止処理
+                if(e.sound && e.sound.isPlaying) e.sound.stop(); 
+            });
             projectiles.forEach(p => scene.remove(p));
             enemies = [];
             projectiles = [];
@@ -362,7 +464,9 @@
             playerVelocity.set(0, 0, 0);
             camera.rotation.set(0, 0, 0);
             
-            createRandomBlocks();
+            // 初期チャンク生成
+            for (let key in activeChunks) removeChunk(key);
+            updateWorldChunks();
 
             isGameRunning = true;
             isSettingsOpen = false;
@@ -371,6 +475,7 @@
 
         function gameOver() {
             isGameRunning = false;
+            enemies.forEach(e => { if(e.sound && e.sound.isPlaying) e.sound.stop(); }); // ゲームオーバーで音停止
             document.querySelector('#overlay h1').innerHTML = "GAME OVER";
             document.querySelector('#overlay p').innerHTML = `撃墜数: ${score}体<br>君は死にたまひぬ。`;
             document.getElementById('start-btn').innerText = "再挑戦";
@@ -402,6 +507,8 @@
             if (!akikoMaterial) return; 
             const sprite = new THREE.Sprite(akikoMaterial);
             sprite.scale.set(1.5, 1.5, 1);
+            
+            // プレイヤーの周囲にスポーン
             const angle = Math.random() * Math.PI * 2;
             const radius = 30 + Math.random() * 20; 
             sprite.position.set(
@@ -417,7 +524,19 @@
             );
             scene.add(hitbox);
 
-            enemies.push({ sprite: sprite, hitbox: hitbox, velocity: new THREE.Vector3(0, 0, 0), isGrounded: false });
+            // --- 3Dサウンドの追加 (NEW) ---
+            let sound;
+            if (bgmBuffer) {
+                sound = new THREE.PositionalAudio(audioListener);
+                sound.setBuffer(bgmBuffer);
+                sound.setRefDistance(15); // 15ユニット以内で最大音量、それ以上離れると減衰
+                sound.setRolloffFactor(1.5); // 減衰の度合い
+                sound.setLoop(true);
+                sound.play();
+                sprite.add(sound); // スプライトに音源を追加（位置が同期される）
+            }
+
+            enemies.push({ sprite: sprite, hitbox: hitbox, sound: sound, velocity: new THREE.Vector3(0, 0, 0), isGrounded: false });
         }
 
         // --- 物理衝突判定 ---
@@ -425,7 +544,7 @@
             let grounded = false;
             let nextY = pos.y + velocity.y;
             
-            // 床
+            // 床 (無限平面)
             if (nextY < height/2) {
                 nextY = height/2;
                 if (velocity.y < 0) { velocity.y = 0; grounded = true; }
@@ -548,9 +667,12 @@
             if (!isGameRunning || isSettingsOpen) return;
             frame++;
 
+            // ワールド更新 (チャンク管理)
+            updateWorldChunks();
+
             // --- コントローラー処理 ---
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-            const gp = gamepads[0]; // プレイヤー1
+            const gp = gamepads[0]; 
 
             const direction = new THREE.Vector3();
             camera.getWorldDirection(direction);
@@ -560,33 +682,26 @@
 
             let moveX = 0, moveZ = 0;
 
-            // キーボード入力
             if (keys.w) { moveX += direction.x; moveZ += direction.z; }
             if (keys.s) { moveX -= direction.x; moveZ -= direction.z; }
             if (keys.d) { moveX += right.x; moveZ += right.z; }
             if (keys.a) { moveX -= right.x; moveZ -= right.z; }
 
-            // スマホタッチ入力
             if (Math.abs(mobileMove.x) > 0 || Math.abs(mobileMove.y) > 0) {
                 moveX += right.x * mobileMove.x - direction.x * mobileMove.y;
                 moveZ += right.z * mobileMove.x - direction.z * mobileMove.y;
             }
 
-            // ゲームパッド入力
             if (gp) {
                 const DEADZONE = 0.2;
-                
-                // 左スティック (移動) Axis 0, 1
                 const lx = Math.abs(gp.axes[0]) > DEADZONE ? gp.axes[0] : 0;
                 const ly = Math.abs(gp.axes[1]) > DEADZONE ? gp.axes[1] : 0;
                 
                 if (Math.abs(lx) > 0 || Math.abs(ly) > 0) {
-                    // スティック入力を移動ベクトルに加算
                     moveX += right.x * lx - direction.x * ly;
                     moveZ += right.z * lx - direction.z * ly;
                 }
 
-                // 右スティック (視点) Axis 2, 3
                 const rx = Math.abs(gp.axes[2]) > DEADZONE ? gp.axes[2] : 0;
                 const ry = Math.abs(gp.axes[3]) > DEADZONE ? gp.axes[3] : 0;
                 
@@ -596,7 +711,6 @@
                     camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
                 }
 
-                // ジャンプ (Button 0: A/Cross)
                 if (gp.buttons[0].pressed) {
                     if (!gamepadState.jump) {
                         playerJump();
@@ -606,7 +720,6 @@
                     gamepadState.jump = false;
                 }
 
-                // 射撃 (Button 7: R2/RT または Button 5: R1/RB)
                 const isShooting = (gp.buttons[7] && gp.buttons[7].pressed) || (gp.buttons[5] && gp.buttons[5].pressed);
                 if (isShooting) {
                     if (!gamepadState.shot) {
@@ -620,15 +733,12 @@
 
             if (keys.space) playerJump();
 
-            // 速度ベクトルへの適用
-            // 移動量が大きくなりすぎないように正規化する場合もありますが、
-            // 簡易的な実装としてそのまま加算しています。
             playerVelocity.x = moveX * playerSpeed;
             playerVelocity.z = moveZ * playerSpeed;
             playerVelocity.y -= GRAVITY;
 
             isGrounded = checkCollision(camera.position, PLAYER_RADIUS, PLAYER_HEIGHT, playerVelocity);
-            if(camera.position.y < -10) camera.position.set(0, 10, 0);
+            if(camera.position.y < -30) camera.position.set(camera.position.x, 20, camera.position.z); // 奈落判定緩和
             playerHitbox.position.copy(camera.position);
 
             for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -641,6 +751,9 @@
                     if (p.position.distanceTo(eData.sprite.position) < 1.5) { 
                         scene.remove(eData.sprite);
                         if(eData.hitbox) scene.remove(eData.hitbox);
+                        // 撃破時に音を止める
+                        if(eData.sound && eData.sound.isPlaying) eData.sound.stop();
+
                         enemies.splice(j, 1);
                         scene.remove(p);
                         projectiles.splice(i, 1);
@@ -713,6 +826,10 @@
 
         window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         document.getElementById('start-btn').addEventListener('click', resetGame);
+        
+        // --- チャンク初期化 ---
+        // 初回ロード時はまだゲーム開始前なので、アニメーションループ内でupdateWorldChunksが呼ばれるのを待つ
+        
         animate();
     </script>
 </body>
